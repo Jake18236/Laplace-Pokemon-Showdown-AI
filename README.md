@@ -138,6 +138,31 @@ bot, same shipped config (it imports `ladder`'s `build_agent`, so the two can't 
 .\.venv\Scripts\python.exe -u -m laplace.cli.analyze_battle --local   # local server, no rated game
 ```
 
+## Live advisor controls
+
+Install [`laplace-advisor.user.js`](laplace-advisor.user.js) in your userscript manager
+and run the local advisor. **Pick best move** submits the current suggestion through
+Showdown's battle controls. **Auto** does the same after `Math.random() * 3` seconds,
+including forced switches and team preview. Auto starts off on every page load; turning
+it off cancels any pending pick. Picks require matching battle, turn, and request IDs,
+and are disabled while searching, spectating, waiting, or playing doubles.
+
+After updating the script, restart the advisor too: version 1.1.0 requires the new
+request IDs and action slots in its responses. Reload Showdown and use **⟳** to resend
+an ongoing battle.
+
+AAA uses a separate Gen 9 native engine compiled **without Terastallization**, removing
+Tera for both sides at every search depth. Build it once in the same Python environment
+as the advisor (requires Rust and your platform's C linker):
+
+```sh
+python -m laplace.cli.build_no_tera_engine
+```
+
+This installs under the active environment's `laplace-no-tera` directory, preserving
+the ordinary engine used by OU and Random Battle. AAA refuses to start if this build
+is missing. Repeat the build when moving to a new Python environment or machine.
+
 ## Playing OU
 
 The same bot also plays **Gen 9 OU**. The search, the guards, the mixed root and the whole

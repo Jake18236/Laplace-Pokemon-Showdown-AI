@@ -52,3 +52,10 @@ OU_SETS = os.path.join(OU_DATA_DIR, "sets_gen9ou.json")
 TEAMS_DIR = os.path.join(ROOT, "teams")
 
 OU_REPLAY_DIR = os.path.join(REPLAYS_DIR, "ladder_ou")
+
+# --- Gen 9 Almost Any Ability -------------------------------------------------
+# Built by `python -m laplace.cli.fetch_ou_data --format gen9almostanyability`.
+AAA_DATA_DIR = os.path.join(DATA_DIR, "aaa")
+AAA_USAGE = os.path.join(AAA_DATA_DIR, "usage_gen9almostanyability.json")
+AAA_SETS = os.path.join(AAA_DATA_DIR, "sets_gen9almostanyability.json")
+AAA_REPLAY_DIR = os.path.join(REPLAYS_DIR, "ladder_aaa")

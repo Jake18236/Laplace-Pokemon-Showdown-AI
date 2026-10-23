@@ -37,11 +37,12 @@ import numpy as np
 from poke_env.player import Player
 from poke_env.data import to_id_str
 
-from poke_engine import monte_carlo_tree_search, generate_instructions
+from poke_engine import generate_instructions
 
 from laplace.agent.knowledge import (estimate_damage_fraction, get_move, move_nullified,
                                      priority_ability_possible, safe_priority)
 from laplace.agent.metagame import RANDBATS
+from laplace.agent.search_backend import search
 
 
 def _spe_mult(boost):
@@ -92,11 +93,11 @@ _RECOVERY_MOVES = frozenset((
 ))
 
 
-def _search_world(state_str, time_ms, threads):
+def _search_world(state_str, time_ms, threads, allow_tera=True):
     """Worker: rebuild the state, search it, return something picklable. None on panic."""
-    from poke_engine import State, monte_carlo_tree_search as _mcts
+    from poke_engine import State
     try:
-        res = _mcts(State.from_string(state_str), time_ms, threads=threads)
+        res = search(State.from_string(state_str), time_ms, threads=threads, allow_tera=allow_tera)
         return ([(o.move_choice, o.visits) for o in res.side_one],
                 [(o.move_choice, o.visits) for o in res.side_two],
                 res.total_visits)
@@ -322,6 +323,13 @@ class EnginePlayer(Player):
             # hang the run in a quieter way than the crash did.
             if len(split_messages) == 1:
                 return
+
+        try:
+            self.metagame.observe(split_messages[0][0].replace(">", "").strip(),
+                                  split_messages)
+        except Exception:
+            self.diag["observe_err"] = self.diag.get("observe_err", 0) + 1
+
         await super()._handle_battle_message(split_messages)
         try:
             tag = split_messages[0][0].replace(">", "").strip()
@@ -625,7 +633,8 @@ class EnginePlayer(Player):
                                         pending=self._pending.get(battle.battle_tag),
                                         use_joint=self.use_joint_sets)
                     fut = self._pool().submit(_search_world, state.to_string(),
-                                              self.SEARCH_TIME_MS, self.THREADS)
+                                              self.SEARCH_TIME_MS, self.THREADS,
+                                              self.metagame.allow_tera)
                     jobs.append((state, fut))
                 except (KeyboardInterrupt, SystemExit):
                     raise
@@ -659,8 +668,8 @@ class EnginePlayer(Player):
                                         opp_item_hints=item_hints,
                                         pending=self._pending.get(battle.battle_tag),
                                         use_joint=self.use_joint_sets)
-                    res = monte_carlo_tree_search(state, self.SEARCH_TIME_MS,
-                                                  threads=self.THREADS)
+                    res = search(state, self.SEARCH_TIME_MS, threads=self.THREADS,
+                                 allow_tera=self.metagame.allow_tera)
                 except (KeyboardInterrupt, SystemExit):
                     raise
                 except BaseException:

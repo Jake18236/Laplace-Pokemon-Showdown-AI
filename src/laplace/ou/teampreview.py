@@ -55,6 +55,12 @@ W_SETUP_ONLY = -0.10
 OPP_MOVES = 4
 
 
+def set_prior(usage, knowledge):
+    """Swap the prior the lead scorer reads (see ou.adapter.set_prior)."""
+    global USAGE, KNOWLEDGE
+    USAGE, KNOWLEDGE = usage, knowledge
+
+
 def _opp_moves(mon):
     """The moves this previewed opponent most likely carries, as Move objects."""
     sid = USAGE.resolve(mon)

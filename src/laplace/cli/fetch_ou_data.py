@@ -1,4 +1,4 @@
-r"""Build the two OU data files the determinizer runs on, from public Smogon sources.
+r"""Build OU or Almost Any Ability data files from public Smogon sources.
 
 Random Battle needs no download: the server checkout ships the exact generator sheet, so
 the bot knows the true set distribution. OU has no such sheet -- players build their own
@@ -19,14 +19,17 @@ _SetSheet/_StatsFeed):
                      evidence has eliminated every curated set. Also supplies the stat
                      estimator: OU spreads are chosen, not fixed, so "base + level + 85 EVs"
                      (the Random Battle convention) is simply wrong here.
+  data/aaa/           The same two files for gen9almostanyability. Its lower sample cutoff
+                     and wider ability tail are configured separately below.
 
 Both are condensed to the head of each distribution before being written, which is what
 keeps a ~30 MB chaos dump down to a committable file without changing any decision the
 sampler would make: the tail is individually sub-0.5% and collectively noise.
 
-    python -m laplace.cli.fetch_ou_data                  # latest month, 1825 cutoff
+    python -m laplace.cli.fetch_ou_data                  # OU, latest month, 1825 cutoff
     python -m laplace.cli.fetch_ou_data --month 2026-06
-    python -m laplace.cli.fetch_ou_data --cutoff 1695    # mid-ladder instead of top-cut
+    python -m laplace.cli.fetch_ou_data --cutoff 1695
+    python -m laplace.cli.fetch_ou_data --format gen9almostanyability
 
 Cutoff is the ladder rating the sample is drawn from. 1825 is the top cut: it is the
 metagame the bot faces once it climbs, and it is the cleanest sample. Drop to 1695 if the
@@ -41,6 +44,7 @@ import argparse
 import gzip
 import json
 import os
+import urllib.error
 import urllib.request
 from datetime import date
 
@@ -53,6 +57,17 @@ SETS_URL = "https://pkmn.github.io/smogon/data/sets/{fmt}.json"
 
 FORMAT = "gen9ou"
 DEFAULT_CUTOFF = 1825
+
+# Per-format: default ladder cutoff, how many abilities to keep, and where the files go.
+# AAA keeps many more abilities because the distribution is far flatter than OU's, and uses
+# a lower default cutoff because OM ladders have thin top-cut samples. If the month/cutoff
+# 404s, check the cutoffs actually published at https://www.smogon.com/stats/<month>/chaos/
+FORMATS = {
+    "gen9ou": {"cutoff": 1825, "keep_abilities": 8,
+               "usage": paths.OU_USAGE, "sets": paths.OU_SETS},
+    "gen9almostanyability": {"cutoff": 1630, "keep_abilities": 20,
+                             "usage": paths.AAA_USAGE, "sets": paths.AAA_SETS},
+}
 
 # How much of each distribution to keep. Measured against the 2026-07 @ 1825 dump, weighted
 # by species usage, rather than guessed:
@@ -121,7 +136,7 @@ def _parse_spread(key):
         return None
 
 
-def condense_usage(chaos):
+def condense_usage(chaos, keep_abilities=8):
     """Chaos JSON -> the committed per-species marginals."""
     data = chaos["data"]
     out = {}
@@ -138,7 +153,7 @@ def condense_usage(chaos):
         total = sum(w for _k, w in top_spreads) or 1.0
         entry = {
             "usage": round(float(info.get("usage", 0.0)), 6),
-            "abilities": _norm(info.get("Abilities", {}), 8),
+            "abilities": _norm(info.get("Abilities", {}), keep_abilities),
             # 'nothing' is a real observation (an empty item slot), so it is kept as-is and
             # translated to the engine's 'none' at sample time, not dropped here.
             "items": _norm(info.get("Items", {}), KEEP_ITEMS),
@@ -229,47 +244,54 @@ def latest_month(fmt, cutoff, back=4):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Download and condense the Gen 9 OU priors.")
+    ap = argparse.ArgumentParser(description="Download and condense the Gen 9 set priors.")
     ap.add_argument("--month", default=None, metavar="YYYY-MM",
                     help="Smogon stats month (default: the latest published)")
-    ap.add_argument("--cutoff", type=int, default=DEFAULT_CUTOFF,
-                    help=f"ladder rating cutoff of the usage sample (default {DEFAULT_CUTOFF})")
-    ap.add_argument("--format", default=FORMAT, help=f"tier (default {FORMAT})")
+    ap.add_argument("--cutoff", type=int, default=None,
+                    help="ladder rating cutoff of the usage sample (default: per format)")
+    ap.add_argument("--format", default=FORMAT, choices=sorted(FORMATS),
+                    help=f"tier (default {FORMAT})")
     ap.add_argument("--usage-only", action="store_true", help="skip the curated sets")
     ap.add_argument("--sets-only", action="store_true", help="skip the usage statistics")
     args = ap.parse_args()
 
-    os.makedirs(paths.OU_DATA_DIR, exist_ok=True)
+    cfg = FORMATS[args.format]
+    cutoff = args.cutoff or cfg["cutoff"]
+    os.makedirs(os.path.dirname(cfg["usage"]), exist_ok=True)
 
     if not args.sets_only:
-        month = args.month or latest_month(args.format, args.cutoff)
-        url = CHAOS_URL.format(month=month, fmt=args.format, cutoff=args.cutoff)
+        month = args.month or latest_month(args.format, cutoff)
+        url = CHAOS_URL.format(month=month, fmt=args.format, cutoff=cutoff)
         print(f"usage stats  {url}", flush=True)
         chaos = json.loads(gzip.decompress(_get(url)))
         info = chaos.get("info", {})
-        usage = condense_usage(chaos)
-        payload = {
-            "_source": url,
-            "_month": month,
-            "_cutoff": args.cutoff,
-            "_battles": info.get("number of battles"),
-            "data": usage,
-        }
-        with open(paths.OU_USAGE, "w", encoding="utf-8") as f:
+        usage = condense_usage(chaos, keep_abilities=cfg["keep_abilities"])
+        payload = {"_source": url, "_month": month, "_cutoff": cutoff,
+                   "_battles": info.get("number of battles"), "data": usage}
+        with open(cfg["usage"], "w", encoding="utf-8") as f:
             json.dump(payload, f, separators=(",", ":"))
-        print(f"  {len(usage)} species  ->  {paths.OU_USAGE} "
-              f"({os.path.getsize(paths.OU_USAGE) / 1e6:.1f} MB, "
+        print(f"  {len(usage)} species  ->  {cfg['usage']} "
+              f"({os.path.getsize(cfg['usage']) / 1e6:.1f} MB, "
               f"{info.get('number of battles')} battles)", flush=True)
 
     if not args.usage_only:
         url = SETS_URL.format(fmt=args.format)
         print(f"curated sets {url}", flush=True)
-        sets = condense_sets(json.loads(_get(url)))
-        with open(paths.OU_SETS, "w", encoding="utf-8") as f:
+        try:
+            sets = condense_sets(json.loads(_get(url)))
+        except urllib.error.HTTPError as exc:
+            if args.format == FORMAT or exc.code != 404:
+                raise
+            # Not every tier has analysis sets published. An empty file is a valid answer:
+            # the sampler falls back to the usage marginals for every world.
+            print("  no curated sets are published for this format; "
+                  "writing an empty file (marginals only).", flush=True)
+            sets = {}
+        with open(cfg["sets"], "w", encoding="utf-8") as f:
             json.dump({"_source": url, "data": sets}, f, separators=(",", ":"))
         n_sets = sum(len(v) for v in sets.values())
-        print(f"  {len(sets)} species / {n_sets} sets  ->  {paths.OU_SETS} "
-              f"({os.path.getsize(paths.OU_SETS) / 1e3:.0f} KB)", flush=True)
+        print(f"  {len(sets)} species / {n_sets} sets  ->  {cfg['sets']} "
+              f"({os.path.getsize(cfg['sets']) / 1e3:.0f} KB)", flush=True)
 
 
 if __name__ == "__main__":

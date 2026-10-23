@@ -42,6 +42,14 @@ from laplace.agent.state_common import (
 from laplace.ou.knowledge import KNOWLEDGE, full_learnset
 from laplace.ou.usage import CURATED, USAGE, DEFAULT_IV, LEVEL, raw_stat
 
+
+def set_prior(usage, curated, knowledge):
+    """Swap the set prior this module samples from. One format per process -- the same
+    trade-off as ladder.configure, and for the same reason (see AAAMetagame)."""
+    global USAGE, CURATED, KNOWLEDGE
+    USAGE, CURATED, KNOWLEDGE = usage, curated, knowledge
+
+
 GEN = 9
 _POKEDEX = GenData.from_gen(GEN).pokedex
 
@@ -340,10 +348,10 @@ def _split_roster(battle):
 
 
 def _opp_side(battle, *, opp_used_since_switch=None, opp_speed_hints=None,
-              opp_item_hints=None, pending=None, use_curated=True):
+              opp_item_hints=None, pending=None, use_curated=True, allow_illusion=True):
     speed_hints = opp_speed_hints or {}
     item_hints = opp_item_hints or {}
-    illusion = _illusion_candidates(battle)
+    illusion = _illusion_candidates(battle) if allow_illusion else ()
     revealed, unseen = _split_roster(battle)
     active = battle.opponent_active_pokemon
 
@@ -435,7 +443,7 @@ def _sampled_species(species_id, use_curated=True):
 # --- entry point --------------------------------------------------------------------------
 
 def build_state(battle, use_stats=True, opp_used_since_switch=None, opp_speed_hints=None,
-                pending=None, use_joint=True, opp_item_hints=None):
+                pending=None, use_joint=True, opp_item_hints=None, allow_illusion=True):
     """A determinized State for the current OU position. Call repeatedly for more samples.
 
     The signature matches `poke_engine_adapter.build_state` exactly so the search does not
@@ -453,7 +461,8 @@ def build_state(battle, use_stats=True, opp_used_since_switch=None, opp_speed_hi
         side_one=_our_side(battle, pending),
         side_two=_opp_side(battle, opp_used_since_switch=opp_used_since_switch,
                            opp_speed_hints=opp_speed_hints, opp_item_hints=opp_item_hints,
-                           pending=pending, use_curated=use_joint),
+                           pending=pending, use_curated=use_joint,
+                           allow_illusion=allow_illusion),
         weather=weather, weather_turns_remaining=weather_left,
         terrain=terrain, terrain_turns_remaining=terrain_left,
         trick_room=tr, trick_room_turns_remaining=tr_left, team_preview=False,

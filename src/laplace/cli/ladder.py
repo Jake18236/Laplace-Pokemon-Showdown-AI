@@ -141,7 +141,7 @@ class FormatProfile:
     """One playable format, and where its runs are kept."""
 
     def __init__(self, name, replay_dir, elo_seed, metagame=None, needs_team=False,
-                 use_value_net=True, stop_on_record=True):
+                 use_value_net=True, stop_on_record=True, agent_kwargs=None):
         self.name = name
         self.replay_dir = replay_dir
         self.elo_seed = elo_seed
@@ -156,6 +156,7 @@ class FormatProfile:
         # back to the next opponent. That ritual only makes sense once there IS a peak worth
         # protecting; a format starting from scratch would stop after its first win.
         self.stop_on_record = stop_on_record
+        self.agent_kwargs = dict(agent_kwargs or {})
         self.team_text = None             # filled by configure() for team formats
         self.team_name = None
         self.team_members = ()
@@ -181,6 +182,13 @@ FORMATS = {
     "gen9ou": lambda: FormatProfile(
         "gen9ou", paths.OU_REPLAY_DIR, elo_seed=0, needs_team=True,
         use_value_net=False, stop_on_record=False),
+    # AAA: the Scarf verdict is OFF. Any Pokemon can carry Swift Swim / Unburden / Chlorophyll
+    # / Quick Feet, so "it outsped me" no longer implies a Choice Scarf, and a false verdict
+    # pins choicescarf into every world for the rest of the game.
+    "gen9almostanyability": lambda: FormatProfile(
+        "gen9almostanyability", paths.AAA_REPLAY_DIR, elo_seed=0, needs_team=True,
+        use_value_net=False, stop_on_record=False,
+        agent_kwargs={"speed_inference": False}),
 }
 
 DEFAULT_FORMAT = "gen9randombattle"
@@ -200,7 +208,7 @@ ELO_HIGH_FILE = PROFILE.elo_high_file
 ELO_HIGH_SEED = PROFILE.elo_seed
 
 
-def configure(fmt, team=None, lead=None):
+def configure(fmt, team=None, lead=None, require_team=True):
     """Select the format for this process. Returns the profile; also rebinds the aliases.
 
     Called once, before any agent is built. Rebinding module globals is not elegant, but the
@@ -209,8 +217,9 @@ def configure(fmt, team=None, lead=None):
     be right there too. The FORK_MODE flag above is resolved the same way, for the same
     reason.
 
-    A team format loads and VALIDATES its team here, so a malformed export fails at startup
-    rather than at match time, several minutes into a run."""
+    When `require_team` is true, a team format loads and VALIDATES its team here, so a
+    malformed export fails at startup rather than at match time, several minutes into a run.
+    The advisor sets it false because it observes a user's existing battle."""
     global PROFILE, BATTLE_FORMAT, REPLAY_DIR, RATING_LOG, ELO_DIR, ELO_HIGH_FILE
     global ELO_HIGH_SEED
     if fmt not in FORMATS:
@@ -221,7 +230,10 @@ def configure(fmt, team=None, lead=None):
         # the OU priors, and a missing OU data file must not stop it from running at all.
         from laplace.ou.metagame import OUMetagame
         profile.metagame = OUMetagame(fixed_lead=lead)
-    if profile.needs_team:
+    elif fmt == "gen9almostanyability":
+        from laplace.aaa.metagame import AAAMetagame
+        profile.metagame = AAAMetagame(fixed_lead=lead)
+    if profile.needs_team and require_team:
         from laplace.ou import teams as ou_teams
         if not team:
             known = ou_teams.available()
@@ -301,6 +313,7 @@ def build_agent(account, fork=False, cls=EnginePlayer, **extra):
         robust_vote=False, mix_root=True, mix_frac=0.9,
         metagame=PROFILE.metagame,
     )
+    kwargs.update(PROFILE.agent_kwargs)
     if PROFILE.team_text:
         kwargs["team"] = PROFILE.team_text
     kwargs.update(extra)

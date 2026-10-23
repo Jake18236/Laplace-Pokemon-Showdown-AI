@@ -54,6 +54,7 @@ class Metagame:
     shipped bot does even by accident."""
 
     name = "gen9randombattle"
+    allow_tera = True
 
     # Whether the format requires us to bring a team. Random Battle generates one; OU does
     # not, and a Player started without one is refused by the server at match time rather
@@ -72,6 +73,14 @@ class Metagame:
         Takes the player because a preview decision may want the agent's own configuration
         (and because the caller must be able to mark the chosen Pokemon on the battle)."""
         return None
+
+    def observe(self, battle_tag, split_messages):
+        """Look at a raw payload BEFORE poke-env parses it. Default: nothing.
+
+        Runs ahead of the parse on purpose: poke-env can call choose_move while handling
+        this very payload, so anything a guard needs from these lines has to be recorded
+        first."""
+        pass
 
     def __repr__(self):
         return f"<Metagame {self.name}>"

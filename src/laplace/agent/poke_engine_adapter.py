@@ -846,7 +846,17 @@ _VOLATILE_MAP = {
 
 
 def _volatile_set(mon):
-    return {s for e in mon.effects if (s := _VOLATILE_MAP.get(e.name))}
+    statuses = {s for e in mon.effects if (s := _VOLATILE_MAP.get(e.name))}
+    # poke-env records |-prepare| separately from effects. Preserve the charge
+    # state so the engine models invulnerability AND the forced second turn.
+    preparing = getattr(mon, "preparing_move", None)
+    if preparing is not None and preparing.id in {
+        "phantomforce", "shadowforce", "fly", "bounce", "dig", "dive",
+        "freezeshock", "geomancy", "iceburn", "meteorbeam", "electroshot",
+        "razorwind", "skullbash", "skyattack", "skydrop", "solarbeam", "solarblade",
+    }:
+        statuses.add(preparing.id)
+    return statuses
 
 
 def _duration_volatiles(mon, last_used):
